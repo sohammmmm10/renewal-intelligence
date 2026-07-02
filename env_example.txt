@@ -1,0 +1,18 @@
+# Renewal Intelligence Engine — Configuration
+# Copy this file to .env and fill in your OpenAI API key
+
+OPENAI_API_KEY=sk-your-openai-api-key-here
+
+# Model settings (gpt-4o-mini is cheapest, gpt-4o is best quality)
+LLM_MODEL=gpt-4o-mini
+
+# Risk scoring weights (must sum to ~1.0)
+WEIGHT_USAGE_DECLINE=0.25
+WEIGHT_SUPPORT_HEALTH=0.15
+WEIGHT_NPS=0.10
+WEIGHT_CSM_SENTIMENT=0.25
+WEIGHT_SDK_RISK=0.15
+WEIGHT_ENGAGEMENT=0.10
+
+# Renewal window (days from today)
+RENEWAL_WINDOW_DAYS=90

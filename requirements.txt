@@ -1,0 +1,26 @@
+# ============================================
+# Renewal Intelligence Engine — Dependencies
+# ============================================
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Fuzzy Matching (account name reconciliation)
+rapidfuzz>=3.0.0
+
+# LLM
+openai>=1.30.0
+
+# Environment & Config
+python-dotenv>=1.0.0
+
+# Frontend / Dashboard
+streamlit>=1.38.0
+plotly>=5.18.0
+
+# CLI colors & formatting
+rich>=13.0.0
+
+# Utilities
+requests>=2.31.0

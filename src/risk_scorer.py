@@ -1,0 +1,135 @@
+"""
+Risk Scorer — Combines all signal scores into a composite risk score and tier.
+
+Architecture:
+    Each signal extractor produces a 0.0–1.0 risk score per account.
+    This module applies configurable weights and produces:
+    - composite_risk_score (0.0–1.0)
+    - risk_tier ("High", "Medium", "Low")
+    - signal_breakdown (which signals contributed most)
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from config import Config
+
+
+def compute_composite_risk(
+    accounts_df: pd.DataFrame,
+    usage_signals: pd.DataFrame,
+    ticket_signals: pd.DataFrame,
+    nps_signals: pd.DataFrame,
+    csm_signals: pd.DataFrame,
+    sdk_signals: pd.DataFrame,
+    engagement_signals: pd.DataFrame,
+    renewal_window_days: int = Config.RENEWAL_WINDOW_DAYS,
+) -> pd.DataFrame:
+    """
+    Merge all signal DataFrames and compute weighted composite risk score.
+
+    Only includes accounts renewing within the renewal window.
+    """
+    now = pd.Timestamp.now()
+    cutoff = now + pd.Timedelta(days=renewal_window_days)
+
+    # Filter to accounts renewing within window
+    renewing = accounts_df[
+        (accounts_df["contract_end_date"] >= now) &
+        (accounts_df["contract_end_date"] <= cutoff)
+    ].copy()
+
+    if renewing.empty:
+        # If no accounts in strict window, include all accounts with future renewals
+        renewing = accounts_df[accounts_df["contract_end_date"] >= now - pd.Timedelta(days=30)].copy()
+
+    # Merge all signals onto renewing accounts
+    merged = renewing.copy()
+
+    for signals_df, score_col, default in [
+        (usage_signals, "usage_risk_score", 0.3),
+        (ticket_signals, "ticket_risk_score", 0.2),
+        (nps_signals, "nps_risk_score", 0.5),       # Default 0.5 if no NPS response
+        (csm_signals, "csm_risk_score", 0.3),        # Default 0.3 if no CSM notes
+        (sdk_signals, "sdk_risk_score", 0.2),
+        (engagement_signals, "engagement_risk_score", 0.3),
+    ]:
+        if not signals_df.empty:
+            merged = merged.merge(signals_df, on="account_id", how="left", suffixes=("", "_dup"))
+            # Drop duplicate columns
+            dup_cols = [c for c in merged.columns if c.endswith("_dup")]
+            merged = merged.drop(columns=dup_cols)
+
+        if score_col not in merged.columns:
+            merged[score_col] = default
+        else:
+            merged[score_col] = merged[score_col].fillna(default)
+
+    # Compute weighted composite score
+    merged["composite_risk_score"] = (
+        merged["usage_risk_score"] * Config.WEIGHT_USAGE_DECLINE
+        + merged["ticket_risk_score"] * Config.WEIGHT_SUPPORT_HEALTH
+        + merged["nps_risk_score"] * Config.WEIGHT_NPS
+        + merged["csm_risk_score"] * Config.WEIGHT_CSM_SENTIMENT
+        + merged["sdk_risk_score"] * Config.WEIGHT_SDK_RISK
+        + merged["engagement_risk_score"] * Config.WEIGHT_ENGAGEMENT
+    ).round(3)
+
+    # Assign risk tier
+    merged["risk_tier"] = merged["composite_risk_score"].apply(_score_to_tier)
+
+    # Days until renewal
+    merged["days_until_renewal"] = (
+        merged["contract_end_date"] - now
+    ).dt.days
+
+    # Sort by risk (highest first)
+    merged = merged.sort_values("composite_risk_score", ascending=False).reset_index(drop=True)
+
+    # Compute top risk drivers per account
+    merged["top_risk_drivers"] = merged.apply(_get_top_drivers, axis=1)
+
+    return merged
+
+
+def _score_to_tier(score: float) -> str:
+    """Convert composite score to risk tier."""
+    if score >= Config.HIGH_RISK_THRESHOLD:
+        return "High"
+    elif score >= Config.MEDIUM_RISK_THRESHOLD:
+        return "Medium"
+    else:
+        return "Low"
+
+
+def _get_top_drivers(row: pd.Series) -> str:
+    """Identify the top 3 risk drivers for an account."""
+    signal_names = {
+        "usage_risk_score": "Usage Decline",
+        "ticket_risk_score": "Support Issues",
+        "nps_risk_score": "Low NPS",
+        "csm_risk_score": "CSM Sentiment",
+        "sdk_risk_score": "SDK Deprecation",
+        "engagement_risk_score": "Low Engagement",
+    }
+
+    scores = {name: row.get(col, 0) for col, name in signal_names.items()}
+    sorted_drivers = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    # Only include drivers that actually contribute (score > 0.3)
+    top = [f"{name} ({score:.0%})" for name, score in sorted_drivers[:3] if score > 0.3]
+    return "; ".join(top) if top else "No significant risk drivers"
+
+
+def get_risk_summary(risk_df: pd.DataFrame) -> dict:
+    """Compute summary statistics for the risk analysis."""
+    return {
+        "total_accounts_analyzed": len(risk_df),
+        "high_risk_count": len(risk_df[risk_df["risk_tier"] == "High"]),
+        "medium_risk_count": len(risk_df[risk_df["risk_tier"] == "Medium"]),
+        "low_risk_count": len(risk_df[risk_df["risk_tier"] == "Low"]),
+        "total_arr_at_risk": int(risk_df[risk_df["risk_tier"].isin(["High", "Medium"])]["arr"].sum()),
+        "high_risk_arr": int(risk_df[risk_df["risk_tier"] == "High"]["arr"].sum()),
+        "avg_risk_score": round(risk_df["composite_risk_score"].mean(), 3),
+        "median_risk_score": round(risk_df["composite_risk_score"].median(), 3),
+    }
