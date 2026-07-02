@@ -42,20 +42,20 @@ def compute_composite_risk(
     """
     Merge all signal DataFrames and compute weighted composite risk score.
 
-    Only includes accounts renewing within the renewal window.
+    Scores ALL 120 accounts regardless of contract date because:
+    1. We have usage/ticket/NPS/SDK/engagement data for ALL accounts
+    2. Risk doesn't start at the renewal date -- it builds over months
+    3. The dataset may be run at any time; filtering by date loses insights
+    4. The days_until_renewal column tells the user which ones are urgent
+    5. Confidence level tells the user which scores are trustworthy
+
+    The output is sorted by risk score (highest first) so the most
+    at-risk accounts surface to the top regardless of renewal date.
     """
     now = pd.Timestamp.now()
-    cutoff = now + pd.Timedelta(days=renewal_window_days)
 
-    # Filter to accounts renewing within window
-    renewing = accounts_df[
-        (accounts_df["contract_end_date"] >= now) &
-        (accounts_df["contract_end_date"] <= cutoff)
-    ].copy()
-
-    if renewing.empty:
-        # If no accounts in strict window, include all accounts with future renewals
-        renewing = accounts_df[accounts_df["contract_end_date"] >= now - pd.Timedelta(days=30)].copy()
+    # Score ALL accounts -- risk exists regardless of renewal date
+    renewing = accounts_df.copy()
 
     # Merge all signals onto renewing accounts
     merged = renewing.copy()
