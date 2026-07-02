@@ -49,6 +49,125 @@ def _chat(system: str, user: str, temperature: float = 0.2, max_tokens: int = 10
 
 
 # ─────────────────────────────────────────────
+# 0. AI-POWERED CSM NOTE PARSING & RECONCILIATION
+# ─────────────────────────────────────────────
+
+def ai_parse_csm_notes(raw_blocks: list[str]) -> list[dict]:
+    """
+    Use LLM to extract structured fields from raw CSM note blocks.
+
+    WHY AI instead of regex?
+    - CSM notes have 5+ different date/name formats that regex can't generalize
+    - Regex breaks on any new format; LLM handles ANY human writing style
+    - LLM understands context: "talked to Sarah's healthcare team" → Meridian Health
+    - One LLM call replaces 10+ fragile regex patterns
+
+    Input:  ["Mar 12 - Acme Corp. They're frustrated...", ...]
+    Output: [{"account_name": "Acme Corp", "account_id": null, "date": "Mar 12", "csm_name": ""}, ...]
+    """
+    if not raw_blocks:
+        return []
+
+    system = (
+        "You are a data extraction assistant. You will receive a list of raw CSM (Customer Success Manager) "
+        "call notes. Each note is messy and has inconsistent formatting.\n\n"
+        "For EACH note, extract:\n"
+        '- "account_name": the customer/company name mentioned (clean it up, remove typos if obvious)\n'
+        '- "account_id": any numeric account ID mentioned (look for patterns like "acct 1001", "#1007", '
+        '"account 1016"). Set to null if not found.\n'
+        '- "date": the date of the note in any format found\n'
+        '- "csm_name": the CSM/person who wrote the note, if mentioned\n\n'
+        "Return a JSON array with one object per note, in the same order as input.\n"
+        "Return ONLY valid JSON, no markdown."
+    )
+
+    # Send notes as numbered list for clarity
+    notes_text = "\n\n".join(
+        f"--- NOTE {i+1} ---\n{block}" for i, block in enumerate(raw_blocks)
+    )
+
+    raw = _chat(system, notes_text, temperature=0.0, max_tokens=4096)
+
+    # Clean markdown wrapping
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        raw = raw.rsplit("```", 1)[0]
+
+    try:
+        results = json.loads(raw)
+        if isinstance(results, list):
+            return results
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: return empty dicts
+    return [{"account_name": "", "account_id": None, "date": "", "csm_name": ""} for _ in raw_blocks]
+
+
+def ai_reconcile_names(
+    extracted_names: list[str],
+    canonical_accounts: list[dict],
+) -> list[dict]:
+    """
+    Use LLM to match messy extracted names to canonical account names.
+
+    WHY AI instead of fuzzy matching?
+    - Fuzzy matching only compares character similarity ("Pinacle" vs "Pinnacle" = 85%)
+    - LLM understands SEMANTIC similarity ("the healthcare account" → Meridian Health)
+    - LLM can resolve abbreviations, nicknames, partial names
+    - LLM sees the FULL list of options and picks the best one with reasoning
+    - Fuzzy matching fails when names are structurally different ("Acme" vs "Acme Corporation")
+
+    Input:
+      extracted_names: ["BritePath Solutions", "Pinacle Media", "vanguard retail", ...]
+      canonical_accounts: [{"account_id": 1001, "account_name": "BrightPath Solutions"}, ...]
+
+    Output: [{"input_name": "BritePath Solutions", "matched_id": 1001,
+              "matched_name": "BrightPath Solutions", "confidence": "high"}, ...]
+    """
+    if not extracted_names:
+        return []
+
+    system = (
+        "You are a data reconciliation assistant. You will receive:\n"
+        "1. A list of MESSY account names extracted from CSM notes (may have typos, wrong casing, abbreviations)\n"
+        "2. A list of CANONICAL account names with their IDs from the official database\n\n"
+        "Your job: match each messy name to the correct canonical account.\n\n"
+        "Rules:\n"
+        "- Match based on meaning, not just character similarity\n"
+        '- If a name is clearly a typo (e.g. "BritePath" = "BrightPath"), match it\n'
+        '- If a name is an abbreviation or partial (e.g. "Acme" = "Acme Corp"), match it\n'
+        "- If you're unsure, set confidence to 'low'\n"
+        "- If no match exists, set matched_id to null\n\n"
+        "Return a JSON array with one object per input name:\n"
+        '{"input_name": "...", "matched_id": 1001, "matched_name": "...", "confidence": "high"|"medium"|"low"}\n\n'
+        "Return ONLY valid JSON, no markdown."
+    )
+
+    user = (
+        f"MESSY NAMES TO MATCH:\n{json.dumps(extracted_names)}\n\n"
+        f"CANONICAL ACCOUNTS:\n{json.dumps(canonical_accounts)}"
+    )
+
+    raw = _chat(system, user, temperature=0.0, max_tokens=4096)
+
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        raw = raw.rsplit("```", 1)[0]
+
+    try:
+        results = json.loads(raw)
+        if isinstance(results, list):
+            return results
+    except json.JSONDecodeError:
+        pass
+
+    return [{"input_name": n, "matched_id": None, "matched_name": None, "confidence": "failed"} for n in extracted_names]
+
+
+# ─────────────────────────────────────────────
 # 1. TRANSLATE NON-ENGLISH NPS COMMENTS
 # ─────────────────────────────────────────────
 
