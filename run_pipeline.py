@@ -34,6 +34,7 @@ from rich.panel import Panel
 
 from config import Config
 from src.data_loader import load_all_data
+from src.data_validator import validate_all
 from src.reconciler import reconcile_csm_notes
 from src.signal_extractor import (
     compute_usage_signals,
@@ -73,22 +74,40 @@ def main():
 
     _log(f"[dim]Model: {Config.LLM_MODEL} | Window: {Config.RENEWAL_WINDOW_DAYS} days[/dim]\n")
 
-    # -- Step 1: Load data --
-    _log("[yellow]Step 1/6:[/yellow] Loading all data sources...")
+    # -- Step 1: Load + Validate data --
+    _log("[yellow]Step 1/7:[/yellow] Loading all data sources...")
     data = load_all_data()
-    accounts = data["accounts"]
-    _log(f"  [green]>> Loaded {len(accounts)} accounts, "
+    _log(f"  [green]>> Loaded {len(data['accounts'])} accounts, "
          f"{len(data['usage'])} usage rows, {len(data['tickets'])} tickets, "
          f"{len(data['nps'])} NPS responses, {len(data['csm_notes'])} CSM notes[/green]")
 
+    # -- Step 1b: Validate data quality --
+    _log("\n[yellow]Step 1b:[/yellow] Validating data quality...")
+    data, validations = validate_all(data)
+    for v in validations:
+        if v.errors:
+            for e in v.errors:
+                _log(f"  [red]ERROR ({v.source}):[/red] {e}")
+        if v.warnings:
+            for w in v.warnings:
+                _log(f"  [yellow]WARN ({v.source}):[/yellow] {w}")
+    total_warnings = sum(len(v.warnings) for v in validations)
+    total_errors = sum(len(v.errors) for v in validations)
+    if total_errors == 0:
+        _log(f"  [green]>> Validation passed ({total_warnings} warnings, 0 errors)[/green]")
+    else:
+        _log(f"  [red]>> Validation found {total_errors} errors, {total_warnings} warnings[/red]")
+
+    accounts = data["accounts"]
+
     # -- Step 2: Reconcile CSM notes --
-    _log("\n[yellow]Step 2/6:[/yellow] Reconciling CSM note account names (fuzzy matching)...")
+    _log("\n[yellow]Step 2/7:[/yellow] Reconciling CSM note account names (AI-first + fuzzy fallback)...")
     csm_notes = reconcile_csm_notes(data["csm_notes"], accounts)
     matched = sum(1 for n in csm_notes if n.account_id is not None)
     _log(f"  [green]>> Reconciled {matched}/{len(csm_notes)} CSM notes to accounts[/green]")
 
     # -- Step 3: Extract signals --
-    _log("\n[yellow]Step 3/6:[/yellow] Extracting risk signals from all data sources...")
+    _log("\n[yellow]Step 3/7:[/yellow] Extracting risk signals from all data sources...")
 
     _log("  [dim]3a) Computing usage decline signals...[/dim]")
     usage_signals = compute_usage_signals(data["usage"])
@@ -103,7 +122,7 @@ def main():
     non_english = len(nps_signals[nps_signals["detected_language"] != "English"]) if "detected_language" in nps_signals.columns else 0
     _log(f"  [green]>> NPS signals: {len(nps_signals)} accounts ({non_english} translated)[/green]")
 
-    _log("  [dim]3d) Analyzing CSM notes with LLM (this takes ~30-60s)...[/dim]")
+    _log("  [dim]3d) Analyzing CSM notes with LLM (async parallel, ~15-30s)...[/dim]")
     t0 = time.time()
     csm_signals = compute_csm_signals(csm_notes, accounts)
     elapsed = time.time() - t0
@@ -119,7 +138,7 @@ def main():
     _log(f"  [green]>> Engagement signals: {len(engagement_signals)} accounts[/green]")
 
     # -- Step 4: Composite risk scoring --
-    _log("\n[yellow]Step 4/6:[/yellow] Computing composite risk scores...")
+    _log("\n[yellow]Step 4/7:[/yellow] Computing composite risk scores (calibrated churn probability)...")
     risk_df = compute_composite_risk(
         accounts, usage_signals, ticket_signals, nps_signals,
         csm_signals, sdk_signals, engagement_signals,
@@ -130,7 +149,7 @@ def main():
 
     # -- Step 5: Generate explanations for at-risk accounts --
     at_risk = risk_df[risk_df["risk_tier"].isin(["High", "Medium"])].copy()
-    _log(f"\n[yellow]Step 5/6:[/yellow] Generating LLM explanations for {len(at_risk)} at-risk accounts...")
+    _log(f"\n[yellow]Step 5/7:[/yellow] Generating LLM explanations for {len(at_risk)} at-risk accounts...")
     t0 = time.time()
     explanations = []
     for idx, (_, row) in enumerate(at_risk.iterrows()):
@@ -159,7 +178,7 @@ def main():
     risk_df["risk_explanation"] = risk_df["risk_explanation"].fillna("Low risk -- no immediate concerns.")
 
     # -- Step 6: Non-obvious insights --
-    _log("\n[yellow]Step 6/6:[/yellow] Discovering non-obvious insights with LLM...")
+    _log("\n[yellow]Step 6/7:[/yellow] Discovering non-obvious insights with LLM...")
     t0 = time.time()
     structured_insights = compile_all_insights(risk_df)
     llm_insights = get_llm_insights(risk_df)

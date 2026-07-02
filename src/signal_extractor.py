@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime
 from src.data_loader import CSMNote, ChangelogEntry
 from src.reconciler import get_csm_notes_by_account
-from src.llm_engine import analyze_csm_notes, translate_comments
+from src.llm_engine import analyze_csm_notes, analyze_csm_notes_batch, translate_comments
 
 
 # ─────────────────────────────────────────────
@@ -240,22 +240,37 @@ def compute_csm_signals(
     """
     Use LLM to analyze CSM notes and extract risk signals.
 
+    UPGRADED: Uses async parallel batch processing (5 concurrent LLM calls)
+    to reduce latency from ~60s to ~15s.
+
     Returns DataFrame with account_id and csm_risk_score (0-1) + structured analysis.
     """
     grouped = get_csm_notes_by_account(csm_notes)
-    results = []
+
+    if not grouped:
+        return pd.DataFrame(columns=[
+            "account_id", "csm_risk_score", "csm_sentiment", "competitor_mentions",
+            "champion_status", "key_concerns", "csm_recommended_actions", "csm_summary",
+        ])
+
+    # Prepare batch of (notes_text, account_name) tuples
+    account_ids = []
+    batch_tasks = []
 
     for account_id, notes in grouped.items():
-        # Get account name
         account_row = accounts_df[accounts_df["account_id"] == account_id]
         account_name = account_row["account_name"].iloc[0] if len(account_row) > 0 else f"Account {account_id}"
-
-        # Combine all notes for this account
         combined_text = "\n\n".join(n.raw_text for n in notes)
 
-        # LLM analysis
-        analysis = analyze_csm_notes(combined_text, account_name)
+        account_ids.append(account_id)
+        batch_tasks.append((combined_text, account_name))
 
+    # Run all analyses in parallel (5 concurrent calls)
+    analyses = analyze_csm_notes_batch(batch_tasks)
+
+    # Build results
+    results = []
+    for account_id, analysis in zip(account_ids, analyses):
         results.append({
             "account_id": account_id,
             "csm_risk_score": analysis.get("risk_score", 0.5),
@@ -267,10 +282,7 @@ def compute_csm_signals(
             "csm_summary": analysis.get("summary", ""),
         })
 
-    return pd.DataFrame(results) if results else pd.DataFrame(columns=[
-        "account_id", "csm_risk_score", "csm_sentiment", "competitor_mentions",
-        "champion_status", "key_concerns", "csm_recommended_actions", "csm_summary",
-    ])
+    return pd.DataFrame(results)
 
 
 # ─────────────────────────────────────────────

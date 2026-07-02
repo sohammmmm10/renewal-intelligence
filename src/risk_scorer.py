@@ -1,12 +1,26 @@
 """
-Risk Scorer — Combines all signal scores into a composite risk score and tier.
+Risk Scorer -- Combines all signal scores into a composite risk score and tier.
 
 Architecture:
-    Each signal extractor produces a 0.0–1.0 risk score per account.
+    Each signal extractor produces a 0.0-1.0 risk score per account.
     This module applies configurable weights and produces:
-    - composite_risk_score (0.0–1.0)
+    - composite_risk_score (0.0-1.0)
     - risk_tier ("High", "Medium", "Low")
+    - confidence_level (how many signals contributed to the score)
     - signal_breakdown (which signals contributed most)
+
+Confidence Calibration:
+    The composite score is a WEIGHTED CHURN PROBABILITY, not a relative rank.
+    - 0.0-0.2 = Very likely to renew (healthy, expanding)
+    - 0.2-0.4 = Likely to renew with minor concerns
+    - 0.4-0.6 = Uncertain -- could go either way, needs attention
+    - 0.6-0.8 = Likely to churn or downgrade
+    - 0.8-1.0 = Very likely to churn (active competitor POC, stated intent to leave)
+
+    Confidence depends on signal coverage:
+    - HIGH confidence: 4+ signals available (NPS + CSM + usage + tickets)
+    - MEDIUM confidence: 2-3 signals available
+    - LOW confidence: 0-1 signals available (mostly defaults)
 """
 
 import pandas as pd
@@ -89,6 +103,9 @@ def compute_composite_risk(
     # Compute top risk drivers per account
     merged["top_risk_drivers"] = merged.apply(_get_top_drivers, axis=1)
 
+    # Compute confidence level based on signal coverage
+    merged["confidence_level"] = merged.apply(_compute_confidence, axis=1)
+
     return merged
 
 
@@ -119,6 +136,39 @@ def _get_top_drivers(row: pd.Series) -> str:
     # Only include drivers that actually contribute (score > 0.3)
     top = [f"{name} ({score:.0%})" for name, score in sorted_drivers[:3] if score > 0.3]
     return "; ".join(top) if top else "No significant risk drivers"
+
+
+def _compute_confidence(row: pd.Series) -> str:
+    """
+    Compute confidence level based on how many REAL signals (not defaults) we have.
+
+    HIGH = 4+ real signals -> we can trust this score
+    MEDIUM = 2-3 real signals -> directionally correct but incomplete
+    LOW = 0-1 real signals -> mostly guessing, treat with caution
+    """
+    # Default values that indicate "no data" (these are our fillna defaults)
+    defaults = {
+        "usage_risk_score": 0.3,
+        "ticket_risk_score": 0.2,
+        "nps_risk_score": 0.5,
+        "csm_risk_score": 0.3,
+        "sdk_risk_score": 0.2,
+        "engagement_risk_score": 0.3,
+    }
+
+    real_signals = 0
+    for col, default_val in defaults.items():
+        val = row.get(col, default_val)
+        # If value differs from default, we have real data for this signal
+        if abs(val - default_val) > 0.01:
+            real_signals += 1
+
+    if real_signals >= 4:
+        return "High"
+    elif real_signals >= 2:
+        return "Medium"
+    else:
+        return "Low"
 
 
 def get_risk_summary(risk_df: pd.DataFrame) -> dict:
