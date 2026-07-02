@@ -106,25 +106,34 @@ def find_score_sentiment_contradictions(risk_df: pd.DataFrame) -> pd.DataFrame:
     Find accounts where the NPS score contradicts the sentiment in the comment.
     Example: NPS=3 but comment says "phenomenal" (likely a data entry error or misunderstanding).
     """
-    if "sentiment_score_mismatch" not in risk_df.columns:
+    mismatch_col = None
+    for col_name in ["sentiment_score_mismatch", "score_contradicts"]:
+        if col_name in risk_df.columns:
+            mismatch_col = col_name
+            break
+
+    if mismatch_col is None:
         return pd.DataFrame()
 
     mismatches = risk_df[
-        risk_df["sentiment_score_mismatch"] == True
+        risk_df[mismatch_col] == True
     ].copy()
 
-    mismatches["insight_type"] = "NPS Score-Sentiment Contradiction"
-    mismatches["insight_detail"] = mismatches.apply(
-        lambda r: (
-            f"NPS score is {int(r.get('nps_score', 0))} but the comment sentiment is negative. "
-            f"Comment: \"{r.get('nps_comment', '')[:100]}...\". "
-            f"This contradiction suggests the score may not reflect true satisfaction."
-        ),
-        axis=1,
-    )
+    if mismatches.empty:
+        return pd.DataFrame()
 
-    return mismatches[["account_id", "account_name", "nps_score",
-                        "nps_comment", "insight_type", "insight_detail"]]
+    mismatches["insight_type"] = "NPS Score-Sentiment Contradiction"
+    details = []
+    for _, r in mismatches.iterrows():
+        details.append(
+            f"NPS score is {int(r.get('nps_score', 0))} but the comment sentiment is negative. "
+            f"Comment: \"{str(r.get('nps_comment', ''))[:100]}...\". "
+            f"This contradiction suggests the score may not reflect true satisfaction."
+    )
+    mismatches["insight_detail"] = details
+
+    out_cols = ["account_id", "account_name", "nps_score", "insight_type", "insight_detail"]
+    return mismatches[[c for c in out_cols if c in mismatches.columns]]
 
 
 def compile_all_insights(risk_df: pd.DataFrame) -> dict:

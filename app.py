@@ -214,7 +214,7 @@ def render_risk_overview(df: pd.DataFrame, summary: dict):
             hole=0.4, title="Risk Tier Distribution"
         )
         fig.update_layout(height=350)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with col2:
         # ARR by risk tier
@@ -227,7 +227,7 @@ def render_risk_overview(df: pd.DataFrame, summary: dict):
         )
         fig.update_layout(height=350, showlegend=False)
         fig.update_traces(texttemplate="$%{value:,.0f}")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # Risk scatter: ARR vs Risk Score
     st.subheader("ARR vs Risk Score")
@@ -241,7 +241,7 @@ def render_risk_overview(df: pd.DataFrame, summary: dict):
         title="Account Risk Map — Size = ARR, Color = Risk Tier",
     )
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Risk table
     st.subheader("All Accounts Ranked by Risk")
@@ -259,7 +259,7 @@ def render_risk_overview(df: pd.DataFrame, summary: dict):
             ] * len(row),
             axis=1,
         ),
-        use_container_width=True,
+        width="stretch",
         height=400,
     )
 
@@ -319,7 +319,7 @@ def render_account_drilldown(df: pd.DataFrame):
         range_color=[0, 1], title="Risk Signal Breakdown",
     )
     fig.update_layout(height=300, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Detail cards
     col1, col2 = st.columns(2)
@@ -385,7 +385,7 @@ def render_signal_analysis(df: pd.DataFrame):
                 aspect="auto",
             )
             fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # SDK version distribution
     col1, col2 = st.columns(2)
@@ -399,7 +399,7 @@ def render_signal_analysis(df: pd.DataFrame):
                 barmode="stack",
             )
             fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     with col2:
         if "plan_tier" in df.columns:
@@ -411,7 +411,7 @@ def render_signal_analysis(df: pd.DataFrame):
                 category_orders={"plan_tier": ["Starter", "Growth", "Scale", "Enterprise"]},
             )
             fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 # ─────────────────────────────────────────────

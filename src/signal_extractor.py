@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime
 from src.data_loader import CSMNote, ChangelogEntry
 from src.reconciler import get_csm_notes_by_account
-from src.llm_engine import analyze_csm_notes, analyze_csm_notes_batch, translate_comments
+from src.llm_engine import analyze_csm_notes, analyze_csm_notes_batch, translate_comments, analyze_nps_sentiment_batch
 
 
 # ─────────────────────────────────────────────
@@ -182,19 +182,20 @@ def compute_nps_signals(nps_df: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             pass
 
-    results = []
+    # Build base NPS risk scores from numeric score
+    base_results = []
     for _, row in nps_df.iterrows():
         account_id = row["account_id"]
         score = row["score"]
         comment = row["verbatim_comment"]
 
-        # NPS score → risk
+        # NPS score -> risk
         if score <= 6:
-            nps_risk = 0.8 + (6 - score) * 0.033  # 0 → 1.0, 6 → 0.8
+            nps_risk = 0.8 + (6 - score) * 0.033  # 0 -> 1.0, 6 -> 0.8
         elif score <= 8:
-            nps_risk = 0.3 + (8 - score) * 0.15   # 7 → 0.45, 8 → 0.3
+            nps_risk = 0.3 + (8 - score) * 0.15   # 7 -> 0.45, 8 -> 0.3
         else:
-            nps_risk = 0.1 * (10 - score)           # 9 → 0.1, 10 → 0.0
+            nps_risk = 0.1 * (10 - score)           # 9 -> 0.1, 10 -> 0.0
 
         # Get translation if available
         translated_comment = comment
@@ -203,27 +204,57 @@ def compute_nps_signals(nps_df: pd.DataFrame) -> pd.DataFrame:
             translated_comment = translations[account_id]["translated"]
             detected_language = translations[account_id]["language"]
 
-        # Check for negative keywords in comment
-        negative_keywords = [
-            "downgrade", "wasted", "done", "frustrated", "leaving",
-            "competitor", "slow", "terrible", "disappointed", "worst",
-            "forever", "cliff", "embarrassing",
-        ]
-        comment_lower = (translated_comment or "").lower()
-        has_negative_sentiment = any(kw in comment_lower for kw in negative_keywords)
-
-        # Boost risk if comment sentiment contradicts score
-        if has_negative_sentiment and score >= 7:
-            nps_risk = min(1.0, nps_risk + 0.2)  # Score-sentiment mismatch
-
-        results.append({
+        base_results.append({
             "account_id": account_id,
-            "nps_risk_score": round(nps_risk, 3),
+            "nps_risk_score": nps_risk,
             "nps_score": score,
             "nps_comment": comment,
             "translated_comment": translated_comment,
             "detected_language": detected_language,
-            "sentiment_score_mismatch": has_negative_sentiment and score >= 7,
+        })
+
+    # Use LLM to analyze ALL comments with non-empty text (replaces keyword list)
+    comments_for_llm = []
+    for r in base_results:
+        comment_text = r["translated_comment"] or r["nps_comment"]
+        if comment_text and len(comment_text.strip()) > 5:
+            comments_for_llm.append({
+                "account_id": r["account_id"],
+                "score": r["nps_score"],
+                "comment": comment_text,
+            })
+
+    # One batch LLM call for all NPS comments
+    sentiment_results = {}
+    if comments_for_llm:
+        try:
+            llm_sentiments = analyze_nps_sentiment_batch(comments_for_llm)
+            for s in llm_sentiments:
+                sentiment_results[s["account_id"]] = s
+        except Exception:
+            pass  # Fallback: no sentiment adjustment
+
+    # Apply LLM sentiment adjustments to base scores
+    results = []
+    for r in base_results:
+        aid = r["account_id"]
+        sentiment_data = sentiment_results.get(aid, {})
+        risk_boost = sentiment_data.get("risk_boost", 0.0)
+        score_contradicts = sentiment_data.get("score_contradicts", False)
+        comment_sentiment = sentiment_data.get("sentiment", "neutral")
+
+        # Apply LLM-detected risk boost
+        adjusted_risk = min(1.0, max(0.0, r["nps_risk_score"] + risk_boost))
+
+        results.append({
+            "account_id": aid,
+            "nps_risk_score": round(adjusted_risk, 3),
+            "nps_score": r["nps_score"],
+            "nps_comment": r["nps_comment"],
+            "translated_comment": r["translated_comment"],
+            "detected_language": r["detected_language"],
+            "comment_sentiment": comment_sentiment,
+            "sentiment_score_mismatch": score_contradicts,
         })
 
     return pd.DataFrame(results)

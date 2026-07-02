@@ -42,8 +42,11 @@ class Config:
     RENEWAL_WINDOW_DAYS = int(os.getenv("RENEWAL_WINDOW_DAYS", "90"))
 
     # --- Risk Tiers ---
-    HIGH_RISK_THRESHOLD = 0.65
-    MEDIUM_RISK_THRESHOLD = 0.40
+    # Calibrated thresholds: these represent churn probability.
+    # 0.60+ = "more likely to churn than not, accounting for signal noise"
+    # 0.35+ = "enough signals to warrant proactive attention"
+    HIGH_RISK_THRESHOLD = 0.60
+    MEDIUM_RISK_THRESHOLD = 0.35
 
     @classmethod
     def ensure_dirs(cls):

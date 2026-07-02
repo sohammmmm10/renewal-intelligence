@@ -276,6 +276,60 @@ def translate_comments(comments: list[dict]) -> list[dict]:
 
 
 # =============================================
+# 1b. ANALYZE NPS COMMENT SENTIMENT (LLM)
+# =============================================
+
+def analyze_nps_sentiment_batch(comments: list[dict]) -> list[dict]:
+    """
+    Use LLM to analyze sentiment of NPS comments in batch.
+
+    WHY LLM instead of keyword list?
+    - Keywords are fragile: "cliff" matches "fell off a cliff" but also "Cliff Street"
+    - Keywords miss sarcasm: "Oh sure, the product is GREAT" (negative intent)
+    - Keywords miss context: "we're done evaluating" could be positive or negative
+    - LLM understands nuance, tone, and context that keywords cannot
+
+    Input: [{"account_id": 1006, "score": 8, "comment": "execution fell off a cliff"}]
+    Output: [{"account_id": 1006, "sentiment": "negative", "score_contradicts": true,
+              "risk_boost": 0.2, "reason": "Negative comment contradicts high NPS score"}]
+    """
+    if not comments:
+        return []
+
+    system = (
+        "You are a customer sentiment analyst. For each NPS comment:\n"
+        "1. Determine if the SENTIMENT is positive, neutral, or negative\n"
+        "2. Check if the sentiment CONTRADICTS the numeric NPS score\n"
+        "   - NPS 7-10 + negative comment = contradiction (hidden risk!)\n"
+        "   - NPS 0-4 + positive comment = contradiction (score may be a mistake)\n"
+        "3. Assign a risk_boost (0.0 to 0.3) if comment reveals hidden risk\n\n"
+        "EXAMPLES:\n"
+        '- Score=8, Comment="execution has fallen off a cliff" -> sentiment: negative, '
+        'score_contradicts: true, risk_boost: 0.25, reason: "Severe negative sentiment despite high NPS"\n'
+        '- Score=3, Comment="phenomenal product, love it" -> sentiment: positive, '
+        'score_contradicts: true, risk_boost: -0.15, reason: "Positive sentiment contradicts low score"\n'
+        '- Score=9, Comment="great team, love working with them" -> sentiment: positive, '
+        'score_contradicts: false, risk_boost: 0.0, reason: "Consistent positive"\n'
+        '- Score=4, Comment="frustrated with constant downtime" -> sentiment: negative, '
+        'score_contradicts: false, risk_boost: 0.0, reason: "Consistent negative"\n\n'
+        'Return JSON with key "analyses" containing array of:\n'
+        '{"account_id": ..., "sentiment": "positive"|"neutral"|"negative", '
+        '"score_contradicts": true|false, "risk_boost": float, "reason": "..."}'
+    )
+
+    user = json.dumps(comments, ensure_ascii=False)
+    result = _chat_json(system, user, temperature=0.0, max_tokens=4096)
+
+    analyses = result.get("analyses", [])
+    if isinstance(analyses, list) and len(analyses) > 0:
+        return analyses
+
+    # Fallback: no risk boost
+    return [{"account_id": c["account_id"], "sentiment": "neutral",
+             "score_contradicts": False, "risk_boost": 0.0, "reason": ""} for c in comments]
+
+
+# =============================================
 # 2. ANALYZE CSM NOTES (ASYNC PARALLEL)
 # =============================================
 
