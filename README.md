@@ -1,221 +1,197 @@
 # Renewal Risk Intelligence Engine
 
-An AI-powered tool that identifies at-risk SaaS account renewals by ingesting multiple data sources (CRM data, usage metrics, support tickets, CSM notes, NPS surveys, product changelog), reconciling messy data, computing weighted risk scores, and generating plain-English explanations using LLMs.
+Predicts which SaaS accounts will churn, explains why, and recommends actions.
 
-Built for the Contentstack BizOps team to replace gut-feel renewal forecasting with data-driven, explainable risk intelligence.
+Ingests 5 messy data sources + changelog, reconciles inconsistencies, extracts 6 risk signals, scores all 120 accounts, and generates LLM-powered explanations.
+
+**Results:** 120 accounts scored | 6 High Risk | 5 Medium | $4.5M ARR at risk
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/sohammmmm10/renewal-intelligence.git
+cd renewal-intelligence
+python -m venv venv && venv\Scripts\activate       # Windows
+pip install -r requirements.txt
+copy env_example.txt .env                          # Add your OpenAI API key
+python run_pipeline.py                             # CLI pipeline
+streamlit run app.py                               # Dashboard
+```
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     DATA INGESTION LAYER                        │
-│  accounts.csv │ usage_metrics.csv │ support_tickets.csv         │
-│  csm_notes.txt │ nps_responses.csv │ changelog.md               │
-│                                                                  │
-│  • CSV/text parsing with type coercion                          │
-│  • CSM notes: regex-based structured extraction                 │
-│  • Changelog: deprecation/breaking-change detection             │
-│  • Fuzzy name matching (RapidFuzz) for reconciliation           │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────┐
-│                    SIGNAL EXTRACTION LAYER                       │
-│                                                                  │
-│  Usage Signals ─── 6-month trend analysis (API, users, content) │
-│  Ticket Signals ── P1/P2 ratio, open tickets, resolution time   │
-│  NPS Signals ───── Score mapping + non-English translation (LLM)│
-│  CSM Signals ───── Sentiment analysis via LLM (GPT-4o-mini)    │
-│  SDK Risk ──────── Changelog correlation (v3.x deprecation)    │
-│  Engagement ────── Active users vs. plan tier benchmarks        │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────┐
-│                    RISK SCORING LAYER                            │
-│                                                                  │
-│  Weighted composite score (0.0 – 1.0) per account:             │
-│    Usage Decline:   25%    │    CSM Sentiment:   25%            │
-│    Support Health:  15%    │    SDK Risk:        15%            │
-│    NPS Score:       10%    │    Engagement:      10%            │
-│                                                                  │
-│  Risk Tiers: High (≥65%) │ Medium (≥40%) │ Low (<40%)          │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────┐
-│                    LLM EXPLANATION LAYER                         │
-│                                                                  │
-│  • Plain-English risk briefing per at-risk account (GPT-4o-mini)│
-│  • Non-obvious insight discovery across the full dataset        │
-│  • CSM note sentiment/competitor/champion extraction            │
-│  • Non-English NPS comment translation                          │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────┐
-│                    PRESENTATION LAYER                            │
-│                                                                  │
-│  CLI: Rich terminal output with tables + panels                 │
-│  Streamlit: Interactive dashboard with charts, drilldowns,      │
-│             signal heatmaps, and insight explorer                │
-│  Exports: CSV (risk scores), JSON (briefings, insights)         │
-└─────────────────────────────────────────────────────────────────┘
+DATA INGESTION ──> SIGNAL EXTRACTION ──> RISK SCORING ──> LLM EXPLANATION
+                                                          
+6 data sources     6 risk signals        Weighted         Plain-English
+CSVs + text +      (0.0-1.0 each)       composite        briefings +
+changelog          via math + LLM        score + tier     non-obvious insights
 ```
 
-## Key Design Decisions & Tradeoffs
+### 7-Step Pipeline
 
-### What "At Risk" Means (My Definition)
+| Step | What | How |
+|------|------|-----|
+| 1 | **Load + Validate** | Parse 5 CSVs + changelog. Validate: duplicates, negative values, missing fields |
+| 2 | **Reconcile** | Match messy CSM note names to accounts. AI-first (LLM) + fuzzy fallback. 27/27 matched |
+| 3a | **Usage Signals** | Compare first 2 months vs last 2 months. API calls, users, content, workflows |
+| 3b | **Ticket Signals** | P1/P2 ratio, open tickets, resolution time, volume |
+| 3c | **NPS Signals** | Score mapping + LLM sentiment analysis on comments + non-English translation |
+| 3d | **CSM Signals** | LLM extracts sentiment, competitors, champion status from unstructured notes |
+| 3e | **SDK Risk** | Cross-reference changelog with usage data. v3.x deprecated = high risk |
+| 3f | **Engagement** | Active users vs plan tier benchmarks. Detects shelfware |
+| 4 | **Risk Scoring** | Weighted composite (see below). Tiers: High/Medium/Low. Confidence levels |
+| 5 | **Explanations** | LLM generates 3-5 sentence actionable briefing per at-risk account |
+| 6 | **Insights** | LLM discovers cross-source patterns rules would miss |
+| 7 | **Export** | CSV + JSON output files |
 
-An account is at-risk when **multiple independent signals** converge:
+---
 
-| Signal | Why It Matters | Weight |
-|--------|---------------|--------|
-| **Usage Decline** | Declining API calls / active users = disengagement | 25% |
-| **CSM Sentiment** | Competitor mentions, champion loss, billing disputes | 25% |
-| **SDK Deprecation** | Accounts on v3.x face forced migration or security risk | 15% |
-| **Support Health** | High P1/P2 tickets + unresolved issues = frustration | 15% |
-| **NPS** | Detractor scores + negative sentiment in comments | 10% |
-| **Engagement** | Low active users vs. plan capacity = shelfware | 10% |
+## Risk Scoring
 
-I weighted CSM notes equally with usage because qualitative signals (competitor evaluations, champion departures) are often the **earliest** churn indicators — preceding metric declines by 1-2 months.
+| Signal | Weight | Why |
+|--------|--------|-----|
+| Usage Decline | 25% | Hard data: declining API calls = disengagement |
+| CSM Sentiment | 25% | Earliest churn signal: competitor mentions, champion loss |
+| SDK Deprecation | 15% | v3.x sunset forces migrate-or-leave decision |
+| Support Health | 15% | Unresolved P1/P2 tickets = frustration |
+| NPS | 10% | Detractor scores, but can be misleading alone |
+| Engagement | 10% | Low users vs plan capacity = shelfware risk |
 
-### How the LLM is Used (Not a Gimmick)
+**Tiers:** High (>=60%) | Medium (>=35%) | Low (<35%)
 
-The LLM (GPT-4o-mini) is used in four **meaningful** ways:
+**Calibration:** Scores are churn probabilities, not relative ranks. 0.60 = "60% likely to churn."
 
-1. **CSM Note Analysis** — Extracting structured signals (sentiment, competitor names, champion status) from messy, unstructured call notes that no regex could reliably parse
-2. **Non-English Translation** — NPS comments in Chinese (account 1017), French (1014), and Spanish (1013) need translation before sentiment analysis
-3. **Risk Explanations** — Generating actionable, plain-English briefings that synthesize 6+ signal dimensions into a coherent narrative
-4. **Insight Discovery** — Finding cross-cutting patterns (e.g., SDK deprecation cascade) that require reasoning across multiple data sources
+**Confidence:** High (4+ real signals), Medium (2-3), Low (0-1 signals available).
 
-### Data Reconciliation Approach
+---
 
-CSM notes are messy by design. My approach:
-- **Step 1**: Extract explicit account IDs from notes (`acct 1001`, `#1007`, `account 1016`)
-- **Step 2**: Extract account names via regex patterns for various date/separator formats
-- **Step 3**: Fuzzy match extracted names against `accounts.csv` using RapidFuzz token_sort_ratio (threshold: 65%)
-- Handles: "BritePath" → "BrightPath", "Pinacle" → "Pinnacle", "Thunderbolt Moters" → "Thunderbolt Motors"
+## How the LLM is Used (7 Places)
 
-### Non-Obvious Insights
+| # | Task | Why LLM, not rules? |
+|---|------|---------------------|
+| 1 | **CSM note entity extraction** | Notes have 5+ formats. Regex breaks on new formats; LLM handles any style |
+| 2 | **Name reconciliation** | "BritePath" -> "BrightPath". LLM understands meaning, not just characters |
+| 3 | **CSM sentiment analysis** | Extracts sentiment, competitors, champion status from messy human writing |
+| 4 | **NPS comment sentiment** | Understands sarcasm, context. Keywords miss "execution fell off a cliff" |
+| 5 | **Non-English translation** | Chinese, French, Spanish NPS comments translated before analysis |
+| 6 | **Risk explanations** | Synthesizes 6 signals into 3-5 sentence actionable briefing |
+| 7 | **Insight discovery** | Finds cross-source patterns: silent churn, SDK cascade, champion loss |
 
-Things a rule-based system would miss:
+---
 
-1. **Silent Churn Pattern** — Meridian Health has NPS=8 but CSM notes reveal they're building a homegrown replacement. The score reflects liking the *people*, not the *product*.
+## AI Architecture Decisions
 
-2. **SDK Deprecation Cascade** — Accounts on v3.x (like NovaTech, Zenith Publishing, Acme Corp) have disproportionately higher ticket volumes. The changelog reveals v3.x loses security patches April 30, 2026, creating a forced-migration-or-churn dynamic.
+### AI-First Reconciliation (3-Tier)
+```
+Tier 1: Fast path    -> Has "acct 1001"? Direct ID lookup. Free, instant.
+Tier 2: AI path      -> Send ALL unmatched names to LLM in 1 batch. Understands typos + context.
+Tier 3: Fuzzy fallback-> If LLM fails, RapidFuzz character matching. Safety net.
+```
+Result: 27/27 matched (vs 26/27 with regex+fuzzy only).
 
-3. **NPS Score-Sentiment Contradictions** — Some accounts have high NPS scores but deeply negative comments (or vice versa), suggesting survey fatigue or data quality issues.
+### Structured Outputs
+All JSON calls use `response_format={"type": "json_object"}`. No markdown stripping. Pydantic models validate every LLM response.
 
-4. **Champion Loss as Leading Indicator** — Accounts where the internal champion is "at risk" (e.g., Orion Education's Director of Content nervous about post-merger role) show stable metrics *now* but are likely to decline within 1-2 months.
+### Async Parallel
+CSM analysis runs 5 concurrent LLM calls via `asyncio + AsyncOpenAI`. 27 notes in ~15s instead of ~60s.
 
-5. **Changelog-Aware Risk** — The changelog's breaking change (v4.2.0 response envelope format change) correlates with increased tickets from accounts on v4.0.0 and v4.1.0 who haven't upgraded.
+### Prompt Engineering
+Every prompt uses: few-shot examples, chain-of-thought ("think step by step"), and score calibration anchors.
 
-## What I'd Do With More Time
+---
 
-- **Historical churn data**: Train a proper ML model (XGBoost/logistic regression) on past churned accounts to learn signal weights empirically
-- **Slack/email integration**: Ingest actual communication channels for real-time sentiment
-- **Time-series forecasting**: Predict *when* usage will hit critical thresholds, not just that it's declining
-- **A/B test risk weights**: Run the model with different weight configurations and validate against actual outcomes
-- **Automated alerting**: Trigger Slack notifications when an account crosses a risk threshold
-- **CRM integration**: Push risk scores back into Salesforce for the account team
-- **Feedback loop**: Let account managers mark predictions as correct/incorrect to improve the model
+## Non-Obvious Insights Found
 
-## What I'd Change for Production
+| Insight | Example | Why rules miss it |
+|---------|---------|-------------------|
+| **Silent Churn** | Meridian Health: NPS=8 but building homegrown replacement | Rules trust NPS score; LLM reads CSM notes revealing migration |
+| **SDK Cascade** | v3.x accounts have more tickets -> frustration -> churn | Rules check sources independently; this is a 3-step causal chain |
+| **Champion Loss** | Vanguard Retail: champion left, usage stable *for now* | Rules only see current metrics; champion loss predicts future decline |
+| **NPS Contradictions** | Score=8 but comment says "execution fell off a cliff" | Rules trust the number; LLM detects sentiment mismatch |
+| **Pricing Pressure** | Zenith ($1.6M): demands 30% discount + Kontent.ai POC | Rules don't parse negotiation context from CSM notes |
 
-- Replace in-memory processing with a database (PostgreSQL) for persistence
-- Add authentication and role-based access to the dashboard
-- Implement incremental processing (only re-score accounts with new signals)
-- Add unit tests with pytest for each signal extractor
-- Use async/batch LLM calls to reduce latency
-- Add monitoring for LLM cost tracking
-- Deploy via Docker with health checks and auto-restart
+---
 
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- OpenAI API key
-
-### Setup
+## Testing
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/renewal-intelligence.git
-cd renewal-intelligence
-
-# 2. Create virtual environment
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment
-# Copy env_example.txt to .env and add your OpenAI API key
-cp env_example.txt .env     # macOS/Linux
-copy env_example.txt .env   # Windows
-# Edit .env and set OPENAI_API_KEY=sk-your-key-here
-
-# 5. Run the CLI pipeline
-python run_pipeline.py
-
-# 6. Or launch the interactive dashboard
-streamlit run app.py
+python -m pytest tests/ -v     # 53 tests, all passing
 ```
 
-### Docker (Optional)
-```bash
-docker build -t renewal-intelligence .
-docker run -e OPENAI_API_KEY=sk-your-key -p 8501:8501 renewal-intelligence
-```
+| Test File | Tests | What's Covered |
+|-----------|-------|----------------|
+| `test_data_loader.py` | 16 | Schema, types, CSM parsing, changelog |
+| `test_reconciler.py` | 10 | Fuzzy matching typos, edge cases |
+| `test_risk_scorer.py` | 11 | Weight math, tier thresholds, confidence |
+| `test_data_validator.py` | 8 | Catches duplicates, negatives, out-of-range |
+| `test_llm_models.py` | 8 | Pydantic handles malformed LLM responses |
+
+---
 
 ## Output Files
 
-After running the pipeline, check the `output/` folder:
+| File | Contents |
+|------|----------|
+| `risk_scored_accounts.csv` | All 120 accounts with scores + tiers |
+| `detailed_signals.csv` | Full 6-signal breakdown per account |
+| `account_briefings.json` | LLM risk explanations per account |
+| `insights.json` | Non-obvious insights + summary stats |
 
-| File | Description |
-|------|-------------|
-| `risk_scored_accounts.csv` | All accounts with composite risk scores and tiers |
-| `detailed_signals.csv` | Full signal breakdown per account |
-| `account_briefings.json` | LLM-generated risk explanations per account |
-| `insights.json` | Summary statistics and non-obvious insights |
-
-## Tech Stack
-
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| Data Processing | pandas, numpy | Industry standard for tabular data |
-| Fuzzy Matching | RapidFuzz | Fast C-extension fuzzy matching for name reconciliation |
-| LLM | OpenAI GPT-4o-mini | Cost-effective ($0.15/1M tokens) with strong reasoning |
-| Dashboard | Streamlit + Plotly | Rapid interactive UI with zero frontend code |
-| CLI Output | Rich | Beautiful terminal tables and progress indicators |
+---
 
 ## Project Structure
 
 ```
-renewal-intelligence/
-├── config.py                 # Settings & .env loading
-├── run_pipeline.py           # CLI entry point — runs full analysis
+├── run_pipeline.py           # CLI entry point (7-step pipeline)
 ├── app.py                    # Streamlit dashboard
-├── requirements.txt          # Python dependencies
-├── env_example.txt           # Environment variable template
+├── config.py                 # Settings, weights, thresholds
 ├── src/
-│   ├── data_loader.py        # Load & parse all 5 data sources + changelog
-│   ├── reconciler.py         # Fuzzy-match CSM note names to account IDs
-│   ├── signal_extractor.py   # Compute risk signals from each source
-│   ├── risk_scorer.py        # Weighted composite scoring + tier assignment
-│   ├── llm_engine.py         # All OpenAI calls (translate, analyze, explain)
+│   ├── data_loader.py        # Parse all data sources
+│   ├── data_validator.py     # Validate data quality before processing
+│   ├── reconciler.py         # AI-first name matching + fuzzy fallback
+│   ├── signal_extractor.py   # 6 risk signal extractors
+│   ├── risk_scorer.py        # Weighted composite scoring + confidence
+│   ├── llm_engine.py         # All OpenAI calls (async, structured, Pydantic)
 │   └── insights.py           # Non-obvious pattern discovery
-├── data/                     # Input data files
-│   ├── accounts.csv
-│   ├── usage_metrics.csv
-│   ├── support_tickets.csv
-│   ├── csm_notes.txt
-│   ├── nps_responses.csv
-│   └── changelog.md
-└── output/                   # Generated analysis results
+├── tests/                    # 53 unit tests
+├── data/                     # Input data (5 CSVs + changelog)
+└── output/                   # Generated results
 ```
 
-## License
+---
 
-MIT
+## Tech Stack
+
+| What | Tool | Why |
+|------|------|-----|
+| LLM | GPT-4o-mini | $0.15/1M tokens, strong reasoning, structured output support |
+| Data | pandas | Industry standard for tabular data |
+| Matching | RapidFuzz | Fast C-extension fuzzy matching |
+| Validation | Pydantic | Typed LLM output schemas with defaults |
+| Async | asyncio + AsyncOpenAI | 3x speedup for parallel LLM calls |
+| Dashboard | Streamlit + Plotly | Interactive UI, zero frontend code |
+| CLI | Rich | Terminal tables and progress output |
+| Tests | pytest | 53 tests covering all modules |
+
+---
+
+## What I'd Do With More Time
+
+- Train ML model (XGBoost) on historical churn data to learn weights empirically
+- Time-series forecasting: predict *when* usage hits critical threshold
+- Slack alerts when account crosses risk threshold
+- CRM integration: push scores to Salesforce
+- Feedback loop: let account managers validate predictions
+
+## What I'd Change for Production
+
+- PostgreSQL for persistence instead of in-memory
+- Auth + role-based access on dashboard
+- Incremental processing (only re-score accounts with new signals)
+- Docker deployment with health checks
+- LLM cost monitoring and rate limiting
