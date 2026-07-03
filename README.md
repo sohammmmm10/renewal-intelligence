@@ -117,10 +117,33 @@ Every prompt uses: few-shot examples, chain-of-thought ("think step by step"), a
 
 ---
 
+## Weight Validation
+
+Weights are empirically validated using pseudo-ground-truth from the data itself:
+- Accounts with negative CSM sentiment + competitor mentions = **expected high risk**
+- Accounts with positive CSM + NPS 9+ + active champion = **expected low risk**
+
+Pipeline tests 5 weight configs and measures:
+- **Separation:** avg score of expected-high minus expected-low (higher = better)
+- **Precision@K:** what % of top-K scored accounts are actually expected-high
+- **Recall:** what % of expected-high accounts get flagged as High tier
+
+```
+Step 7/7: Validating risk scoring weights...
+  >> Ground truth: 16 expected-high, 28 expected-low
+  >> Separation: 0.334 (high avg=0.44, low avg=0.11)
+  >> Precision@K: 69% | Recall: 38%
+  >> Weights VALIDATED: current config is optimal or near-optimal
+```
+
+Note: Without real churn/renew outcome labels, this is a ranking validation. With historical data, we'd train XGBoost to learn optimal weights.
+
+---
+
 ## Testing
 
 ```bash
-python -m pytest tests/ -v     # 53 tests, all passing
+python -m pytest tests/ -v     # 60 tests, all passing
 ```
 
 | Test File | Tests | What's Covered |
@@ -130,6 +153,7 @@ python -m pytest tests/ -v     # 53 tests, all passing
 | `test_risk_scorer.py` | 11 | Weight math, tier thresholds, confidence |
 | `test_data_validator.py` | 8 | Catches duplicates, negatives, out-of-range |
 | `test_llm_models.py` | 8 | Pydantic handles malformed LLM responses |
+| `test_weight_validator.py` | 7 | Ground truth labeling, weight sensitivity |
 
 ---
 
@@ -157,8 +181,9 @@ python -m pytest tests/ -v     # 53 tests, all passing
 │   ├── signal_extractor.py   # 6 risk signal extractors
 │   ├── risk_scorer.py        # Weighted composite scoring + confidence
 │   ├── llm_engine.py         # All OpenAI calls (async, structured, Pydantic)
-│   └── insights.py           # Non-obvious pattern discovery
-├── tests/                    # 53 unit tests
+│   ├── insights.py           # Non-obvious pattern discovery
+│   └── weight_validator.py   # Empirical weight validation
+├── tests/                    # 60 unit tests
 ├── data/                     # Input data (5 CSVs + changelog)
 └── output/                   # Generated results
 ```
@@ -176,13 +201,13 @@ python -m pytest tests/ -v     # 53 tests, all passing
 | Async | asyncio + AsyncOpenAI | 3x speedup for parallel LLM calls |
 | Dashboard | Streamlit + Plotly | Interactive UI, zero frontend code |
 | CLI | Rich | Terminal tables and progress output |
-| Tests | pytest | 53 tests covering all modules |
+| Tests | pytest | 60 tests covering all modules |
 
 ---
 
 ## What I'd Do With More Time
 
-- Train ML model (XGBoost) on historical churn data to learn weights empirically
+- Train ML model (XGBoost) on historical churn labels to replace pseudo-ground-truth validation
 - Time-series forecasting: predict *when* usage hits critical threshold
 - Slack alerts when account crosses risk threshold
 - CRM integration: push scores to Salesforce

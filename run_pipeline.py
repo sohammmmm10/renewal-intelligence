@@ -47,6 +47,7 @@ from src.signal_extractor import (
 from src.risk_scorer import compute_composite_risk, get_risk_summary
 from src.insights import compile_all_insights, get_llm_insights
 from src.llm_engine import generate_risk_explanation
+from src.weight_validator import validate_current_weights
 
 console = Console(force_terminal=True)
 
@@ -184,6 +185,19 @@ def main():
     llm_insights = get_llm_insights(risk_df)
     elapsed = time.time() - t0
     _log(f"  [green]>> Insights generated ({elapsed:.1f}s)[/green]")
+
+    # -- Step 7: Validate weights --
+    _log("\n[yellow]Step 7/7:[/yellow] Validating risk scoring weights...")
+    validation = validate_current_weights(risk_df)
+    m = validation["current_metrics"]
+    _log(f"  [green]>> Ground truth: {m['n_expected_high']} expected-high, {m['n_expected_low']} expected-low[/green]")
+    _log(f"  [green]>> Separation: {m['separation']:.3f} (high avg={m['avg_high_score']:.2f}, low avg={m['avg_low_score']:.2f})[/green]")
+    _log(f"  [green]>> Precision@K: {m['precision_at_k']:.0%} | Recall: {m['recall']:.0%}[/green]")
+    _log(f"  [green]>> Current weights rank: #{validation['current_rank']} of 5 configs tested[/green]")
+    if validation["is_optimal"]:
+        _log("  [green]>> Weights VALIDATED: current config is optimal or near-optimal[/green]")
+    else:
+        _log(f"  [yellow]>> Consider: {validation['best_config']} performed better[/yellow]")
 
     # -- Display Results --
     _log("")
