@@ -127,7 +127,10 @@ def render_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         f"**Model:** `{Config.LLM_MODEL}`\n\n"
-        f"**Window:** {Config.RENEWAL_WINDOW_DAYS} days"
+        f"**Snapshot Date:** {Config.DATASET_DATE.date()}\n\n"
+        f"**Renewal Window:** {Config.RENEWAL_WINDOW_DAYS} days\n\n"
+        f"**Showing:** Accounts renewing {Config.DATASET_DATE.date()} to "
+        f"{(Config.DATASET_DATE + pd.Timedelta(days=Config.RENEWAL_WINDOW_DAYS)).date()}"
     )
 
     return risk_filter, plan_filter, min_arr

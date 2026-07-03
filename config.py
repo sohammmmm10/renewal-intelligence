@@ -3,6 +3,7 @@ Configuration module — loads settings from .env file.
 """
 
 import os
+import pandas as pd
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -40,6 +41,14 @@ class Config:
 
     # --- Renewal Window ---
     RENEWAL_WINDOW_DAYS = int(os.getenv("RENEWAL_WINDOW_DAYS", "90"))
+
+    # --- Dataset Snapshot Date ---
+    # Fixed date for reproducible results. The dataset was created ~April 2026
+    # (CSM notes are dated March-April 2026). Using April 10, 2026 as the
+    # "today" reference so the 90-day renewal window correctly captures the
+    # 27 accounts the assignment intended.
+    # Override with DATASET_DATE env var (format: YYYY-MM-DD).
+    DATASET_DATE = pd.Timestamp(os.getenv("DATASET_DATE", "2026-04-10"))
 
     # --- Risk Tiers ---
     # Calibrated thresholds: these represent churn probability.

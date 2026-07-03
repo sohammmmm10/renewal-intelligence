@@ -6,6 +6,50 @@ import numpy as np
 from config import Config
 
 
+class TestRenewalWindowFilter:
+    """Verify that only accounts renewing within the 90-day window appear."""
+
+    def test_no_negative_days_until_renewal(self):
+        """Primary deliverable must not include past-due accounts."""
+        from src.data_loader import load_all_data
+        from src.signal_extractor import compute_usage_signals, compute_engagement_signals
+        from src.risk_scorer import compute_composite_risk
+
+        data = load_all_data()
+        usage_signals = compute_usage_signals(data["usage"])
+        engagement_signals = compute_engagement_signals(data["usage"], data["accounts"])
+        empty = pd.DataFrame(columns=["account_id"])
+
+        risk_df = compute_composite_risk(
+            data["accounts"], usage_signals, empty, empty, empty,
+            pd.DataFrame(columns=["account_id", "sdk_risk_score", "sdk_version", "sdk_risk_factors"]),
+            engagement_signals,
+        )
+
+        assert (risk_df["days_until_renewal"] >= 0).all(), \
+            "All accounts in primary output must have days_until_renewal >= 0"
+
+    def test_max_days_within_window(self):
+        """No account should exceed the configured renewal window."""
+        from src.data_loader import load_all_data
+        from src.signal_extractor import compute_usage_signals, compute_engagement_signals
+        from src.risk_scorer import compute_composite_risk
+
+        data = load_all_data()
+        usage_signals = compute_usage_signals(data["usage"])
+        engagement_signals = compute_engagement_signals(data["usage"], data["accounts"])
+        empty = pd.DataFrame(columns=["account_id"])
+
+        risk_df = compute_composite_risk(
+            data["accounts"], usage_signals, empty, empty, empty,
+            pd.DataFrame(columns=["account_id", "sdk_risk_score", "sdk_version", "sdk_risk_factors"]),
+            engagement_signals,
+        )
+
+        assert (risk_df["days_until_renewal"] <= Config.RENEWAL_WINDOW_DAYS).all(), \
+            f"All accounts must be within {Config.RENEWAL_WINDOW_DAYS}-day window"
+
+
 class TestRiskTierThresholds:
     """Verify risk tier thresholds are correctly configured."""
 

@@ -3,24 +3,14 @@ Risk Scorer -- Combines all signal scores into a composite risk score and tier.
 
 Architecture:
     Each signal extractor produces a 0.0-1.0 risk score per account.
-    This module applies configurable weights and produces:
-    - composite_risk_score (0.0-1.0)
-    - risk_tier ("High", "Medium", "Low")
-    - confidence_level (how many signals contributed to the score)
-    - signal_breakdown (which signals contributed most)
+    This module:
+    1. Scores ALL 120 accounts (signals exist for all of them)
+    2. Filters the PRIMARY deliverable to accounts renewing in the next 90 days
+       (as required by the assignment)
+    3. Returns both: in-window accounts (primary) and all accounts (full)
 
-Confidence Calibration:
-    The composite score is a WEIGHTED CHURN PROBABILITY, not a relative rank.
-    - 0.0-0.2 = Very likely to renew (healthy, expanding)
-    - 0.2-0.4 = Likely to renew with minor concerns
-    - 0.4-0.6 = Uncertain -- could go either way, needs attention
-    - 0.6-0.8 = Likely to churn or downgrade
-    - 0.8-1.0 = Very likely to churn (active competitor POC, stated intent to leave)
-
-    Confidence depends on signal coverage:
-    - HIGH confidence: 4+ signals available (NPS + CSM + usage + tickets)
-    - MEDIUM confidence: 2-3 signals available
-    - LOW confidence: 0-1 signals available (mostly defaults)
+    Uses Config.DATASET_DATE as the fixed reference date for reproducibility.
+    The dataset was created ~April 2026, so we use 2026-04-10 as "today".
 """
 
 import pandas as pd
@@ -42,19 +32,18 @@ def compute_composite_risk(
     """
     Merge all signal DataFrames and compute weighted composite risk score.
 
-    Scores ALL 120 accounts regardless of contract date because:
-    1. We have usage/ticket/NPS/SDK/engagement data for ALL accounts
-    2. Risk doesn't start at the renewal date -- it builds over months
-    3. The dataset may be run at any time; filtering by date loses insights
-    4. The days_until_renewal column tells the user which ones are urgent
-    5. Confidence level tells the user which scores are trustworthy
+    Scores all 120 accounts, then filters to the renewal window.
 
-    The output is sorted by risk score (highest first) so the most
-    at-risk accounts surface to the top regardless of renewal date.
+    Uses Config.DATASET_DATE (fixed: 2026-04-10) instead of now() so that
+    results are reproducible regardless of when the pipeline is run.
+
+    Returns only accounts with 0 <= days_until_renewal <= renewal_window_days.
     """
-    now = pd.Timestamp.now()
+    # Fixed snapshot date for reproducibility
+    reference_date = Config.DATASET_DATE
+    cutoff = reference_date + pd.Timedelta(days=renewal_window_days)
 
-    # Score ALL accounts -- risk exists regardless of renewal date
+    # Score ALL accounts (we have signals for all 120)
     renewing = accounts_df.copy()
 
     # Merge all signals onto renewing accounts
@@ -92,10 +81,16 @@ def compute_composite_risk(
     # Assign risk tier
     merged["risk_tier"] = merged["composite_risk_score"].apply(_score_to_tier)
 
-    # Days until renewal
+    # Days until renewal (relative to dataset snapshot date)
     merged["days_until_renewal"] = (
-        merged["contract_end_date"] - now
+        merged["contract_end_date"] - reference_date
     ).dt.days
+
+    # Filter to accounts renewing within the window (0 <= days <= 90)
+    merged = merged[
+        (merged["days_until_renewal"] >= 0) &
+        (merged["days_until_renewal"] <= renewal_window_days)
+    ].copy()
 
     # Sort by risk (highest first)
     merged = merged.sort_values("composite_risk_score", ascending=False).reset_index(drop=True)

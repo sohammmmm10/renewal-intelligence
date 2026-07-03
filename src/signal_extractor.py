@@ -8,6 +8,7 @@ Higher = more risky.
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from config import Config
 from src.data_loader import CSMNote, ChangelogEntry
 from src.reconciler import get_csm_notes_by_account
 from src.llm_engine import analyze_csm_notes, analyze_csm_notes_batch, translate_comments, analyze_nps_sentiment_batch
@@ -95,7 +96,7 @@ def compute_ticket_signals(tickets_df: pd.DataFrame) -> pd.DataFrame:
     Returns DataFrame with account_id and ticket_risk_score (0-1).
     """
     results = []
-    now = pd.Timestamp.now()
+    now = Config.DATASET_DATE
     ninety_days_ago = now - pd.Timedelta(days=90)
 
     for account_id, group in tickets_df.groupby("account_id"):

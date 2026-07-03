@@ -73,7 +73,7 @@ def main():
         _log(f"[red]Configuration Error:[/red] {e}")
         sys.exit(1)
 
-    _log(f"[dim]Model: {Config.LLM_MODEL} | Window: {Config.RENEWAL_WINDOW_DAYS} days[/dim]\n")
+    _log(f"[dim]Model: {Config.LLM_MODEL} | Window: {Config.RENEWAL_WINDOW_DAYS} days | Snapshot: {Config.DATASET_DATE.date()}[/dim]\n")
 
     # -- Step 1: Load + Validate data --
     _log("[yellow]Step 1/7:[/yellow] Loading all data sources...")
@@ -227,7 +227,7 @@ def _print_summary(summary: dict):
 
 def _print_risk_table(risk_df: pd.DataFrame):
     """Print the top at-risk accounts table."""
-    table = Table(title="Top At-Risk Accounts (Renewing in Next 90 Days)")
+    table = Table(title=f"At-Risk Accounts (Renewing {Config.DATASET_DATE.date()} to {(Config.DATASET_DATE + pd.Timedelta(days=Config.RENEWAL_WINDOW_DAYS)).date()})")
     table.add_column("Rank", style="dim", width=4)
     table.add_column("Account", style="bold", width=24)
     table.add_column("Risk", justify="center", width=6)

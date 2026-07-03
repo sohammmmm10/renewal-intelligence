@@ -64,7 +64,7 @@ changelog          via math + LLM        score + tier     non-obvious insights
 
 **Tiers:** High (>=60%) | Medium (>=35%) | Low (<35%)
 
-**Calibration:** Scores are churn probabilities, not relative ranks. 0.60 = "60% likely to churn."
+**Scoring:** Weighted risk scores (0.0-1.0). Higher = more risk signals present. Without historical churn labels, these are risk indicators, not calibrated probabilities.
 
 **Confidence:** High (4+ real signals), Medium (2-3), Low (0-1 signals available).
 
@@ -95,7 +95,7 @@ Tier 3: Fuzzy fallback-> If LLM fails, RapidFuzz character matching. Safety net.
 Result: 27/27 matched (vs 26/27 with regex+fuzzy only).
 
 ### Structured Outputs
-All JSON calls use `response_format={"type": "json_object"}`. No markdown stripping. Pydantic models validate every LLM response.
+All JSON calls use `response_format={"type": "json_object"}` for guaranteed valid JSON. Key models (CSMAnalysis, ReconciliationMatch) use Pydantic for typed validation with safe defaults.
 
 ### Async Parallel
 CSM analysis runs 5 concurrent LLM calls via `asyncio + AsyncOpenAI`. 27 notes in ~15s instead of ~60s.
@@ -136,7 +136,7 @@ Step 7/7: Validating risk scoring weights...
   >> Weights VALIDATED: current config is optimal or near-optimal
 ```
 
-Note: Without real churn/renew outcome labels, this is a ranking validation. With historical data, we'd train XGBoost to learn optimal weights.
+Note: This is a ranking validation using pseudo-ground-truth (circular by nature — CSM sentiment is both a signal and a label). With real churn/renew outcome labels, we'd train XGBoost to learn optimal weights empirically.
 
 ---
 
