@@ -139,7 +139,7 @@ def main():
     _log(f"  [green]>> Engagement signals: {len(engagement_signals)} accounts[/green]")
 
     # -- Step 4: Composite risk scoring --
-    _log("\n[yellow]Step 4/7:[/yellow] Computing composite risk scores (calibrated churn probability)...")
+    _log("\n[yellow]Step 4/7:[/yellow] Computing composite risk scores (accounts renewing in next 90 days)...")
     risk_df = compute_composite_risk(
         accounts, usage_signals, ticket_signals, nps_signals,
         csm_signals, sdk_signals, engagement_signals,

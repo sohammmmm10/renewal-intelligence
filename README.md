@@ -2,9 +2,9 @@
 
 Predicts which SaaS accounts will churn, explains why, and recommends actions.
 
-Ingests 5 messy data sources + changelog, reconciles inconsistencies, extracts 6 risk signals, scores all 120 accounts, and generates LLM-powered explanations.
+Ingests 5 messy data sources + changelog, reconciles inconsistencies, extracts 6 risk signals, and generates LLM-powered explanations for accounts renewing in the next 90 days.
 
-**Results:** 120 accounts scored | 6 High Risk | 5 Medium | $4.5M ARR at risk
+**Results:** 27 accounts in renewal window | 6 High Risk | 4 Medium | $4M ARR at risk
 
 ---
 
@@ -70,17 +70,18 @@ changelog          via math + LLM        score + tier     non-obvious insights
 
 ---
 
-## How the LLM is Used (7 Places)
+## How the LLM is Used (6 Places)
 
 | # | Task | Why LLM, not rules? |
 |---|------|---------------------|
-| 1 | **CSM note entity extraction** | Notes have 5+ formats. Regex breaks on new formats; LLM handles any style |
-| 2 | **Name reconciliation** | "BritePath" -> "BrightPath". LLM understands meaning, not just characters |
-| 3 | **CSM sentiment analysis** | Extracts sentiment, competitors, champion status from messy human writing |
-| 4 | **NPS comment sentiment** | Understands sarcasm, context. Keywords miss "execution fell off a cliff" |
-| 5 | **Non-English translation** | Chinese, French, Spanish NPS comments translated before analysis |
-| 6 | **Risk explanations** | Synthesizes 6 signals into 3-5 sentence actionable briefing |
-| 7 | **Insight discovery** | Finds cross-source patterns: silent churn, SDK cascade, champion loss |
+| 1 | **Name reconciliation** | "BritePath" -> "BrightPath". LLM understands meaning, not just characters |
+| 2 | **CSM sentiment analysis** | Extracts sentiment, competitors, champion status from messy human writing |
+| 3 | **NPS comment sentiment** | Understands sarcasm, context. Keywords miss "execution fell off a cliff" |
+| 4 | **Non-English translation** | Chinese, French, Spanish NPS comments translated before analysis |
+| 5 | **Risk explanations** | Synthesizes 6 signals into 3-5 sentence actionable briefing |
+| 6 | **Insight discovery** | Finds cross-source patterns: silent churn, SDK cascade, champion loss |
+
+Note: CSM note parsing (extracting dates/names from raw text) uses regex, not LLM. The `ai_parse_csm_notes` function exists in `llm_engine.py` as an alternative but is not used in the current pipeline -- regex is faster and sufficient for the known formats.
 
 ---
 
@@ -143,14 +144,14 @@ Note: This is a ranking validation using pseudo-ground-truth (circular by nature
 ## Testing
 
 ```bash
-python -m pytest tests/ -v     # 60 tests, all passing
+python -m pytest tests/ -v     # 62 tests, all passing
 ```
 
 | Test File | Tests | What's Covered |
 |-----------|-------|----------------|
 | `test_data_loader.py` | 16 | Schema, types, CSM parsing, changelog |
 | `test_reconciler.py` | 10 | Fuzzy matching typos, edge cases |
-| `test_risk_scorer.py` | 11 | Weight math, tier thresholds, confidence |
+| `test_risk_scorer.py` | 13 | Weight math, tier thresholds, confidence, renewal window filter |
 | `test_data_validator.py` | 8 | Catches duplicates, negatives, out-of-range |
 | `test_llm_models.py` | 8 | Pydantic handles malformed LLM responses |
 | `test_weight_validator.py` | 7 | Ground truth labeling, weight sensitivity |
@@ -161,7 +162,7 @@ python -m pytest tests/ -v     # 60 tests, all passing
 
 | File | Contents |
 |------|----------|
-| `risk_scored_accounts.csv` | All 120 accounts with scores + tiers |
+| `risk_scored_accounts.csv` | 27 in-window accounts with scores + tiers |
 | `detailed_signals.csv` | Full 6-signal breakdown per account |
 | `account_briefings.json` | LLM risk explanations per account |
 | `insights.json` | Non-obvious insights + summary stats |
@@ -183,7 +184,7 @@ python -m pytest tests/ -v     # 60 tests, all passing
 │   ├── llm_engine.py         # All OpenAI calls (async, structured, Pydantic)
 │   ├── insights.py           # Non-obvious pattern discovery
 │   └── weight_validator.py   # Empirical weight validation
-├── tests/                    # 60 unit tests
+├── tests/                    # 62 unit tests
 ├── data/                     # Input data (5 CSVs + changelog)
 └── output/                   # Generated results
 ```
@@ -201,7 +202,7 @@ python -m pytest tests/ -v     # 60 tests, all passing
 | Async | asyncio + AsyncOpenAI | 3x speedup for parallel LLM calls |
 | Dashboard | Streamlit + Plotly | Interactive UI, zero frontend code |
 | CLI | Rich | Terminal tables and progress output |
-| Tests | pytest | 60 tests covering all modules |
+| Tests | pytest | 62 tests covering all modules |
 
 ---
 
