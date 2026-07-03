@@ -73,69 +73,66 @@ def parse_csm_notes(path: Path = Config.CSM_NOTES_TXT) -> list[CSMNote]:
     """
     Parse the messy CSM notes text file into structured entries.
 
-    The notes have inconsistent formatting:
-    - "Mar 12 - Acme Corp."
-    - "3/15 acct 1001 - BritePath Solutions"
-    - "2026-03-20 | NovaTech Industries | James O."
-    - "march 25 -- meridian health -- priya"
+    Uses LLM (ai_parse_csm_notes) as PRIMARY extraction because notes have
+    5+ inconsistent formats. Regex is kept as FALLBACK to fill any fields
+    the LLM misses or if the LLM call fails entirely.
     """
+    from src.llm_engine import ai_parse_csm_notes
+
     text = path.read_text(encoding="utf-8")
-
-    # Split on the "---" separator lines
     raw_blocks = re.split(r"\n---+\n", text)
+    cleaned_blocks = [b.strip() for b in raw_blocks if b.strip() and not b.strip().startswith("=== CSM")]
+
+    # PRIMARY: LLM entity extraction
+    ai_results = None
+    try:
+        ai_results = ai_parse_csm_notes(cleaned_blocks)
+    except Exception:
+        pass  # Fall through to regex-only
+
     notes = []
-
-    for block in raw_blocks:
-        block = block.strip()
-        if not block or block.startswith("=== CSM"):
-            continue
-
+    for i, block in enumerate(cleaned_blocks):
         note = CSMNote(raw_text=block)
 
-        # Try to extract account ID like "acct 1001" or "(1004)" or "#1007" or "account 1016"
-        id_match = re.search(r"(?:acct|account|#)\s*(\d{4})", block, re.IGNORECASE)
-        if id_match:
-            note.account_id = int(id_match.group(1))
+        # Use LLM-extracted fields if available
+        if ai_results and i < len(ai_results):
+            parsed = ai_results[i]
+            note.account_name = parsed.get("account_name", "") or ""
+            note.csm_name = parsed.get("csm_name", "") or ""
+            note.date_str = parsed.get("date", "") or ""
+            if parsed.get("account_id"):
+                try:
+                    note.account_id = int(parsed["account_id"])
+                except (ValueError, TypeError):
+                    pass
 
-        # Try to extract account name from first line
-        first_line = block.split("\n")[0]
+        # FALLBACK: Regex fills any fields the LLM missed
+        if not note.account_id:
+            id_match = re.search(r"(?:acct|account|#)\s*(\d{4})", block, re.IGNORECASE)
+            if id_match:
+                note.account_id = int(id_match.group(1))
 
-        # Pattern: various date formats followed by separator and account name
-        # "Mar 12 - Acme Corp."
-        # "3/15 acct 1001 - BritePath Solutions (sic) call"
-        # "2026-03-20 | NovaTech Industries | James O."
-        # "march 25 -- meridian health -- priya"
-        name_patterns = [
-            r"\d{4}-\d{2}-\d{2}\s*\|\s*([^|]+?)(?:\s*\||\s*$)",     # ISO date | Name |
-            r"(?:Mar|Apr|Jan|Feb|march|april)\s+\d+\s*[-–]+\s*(.+?)(?:\s*[-–(]|$)",  # "Mar 12 - Name"
-            r"\d+/\d+\s+(?:acct\s+\d+\s*[-–]+\s*)?(.+?)(?:\s+(?:call|sic|\()|$)",    # "3/15 acct 1001 - Name"
-            r"^\d{2}/\d{2}\s+(.+?)(?:\s*$)",                         # "04/03 Atlas Financial"
-        ]
-
-        for pattern in name_patterns:
-            m = re.search(pattern, first_line, re.IGNORECASE)
-            if m:
-                name = m.group(1).strip().rstrip(".")
-                # Clean up: remove "(sic)", "call", etc.
-                name = re.sub(r"\s*\(sic\).*", "", name)
-                name = re.sub(r"\s+call\b.*", "", name, flags=re.IGNORECASE)
-                if len(name) > 3:  # Skip too-short matches
-                    note.account_name = name
-                    break
-
-        # If we still don't have a name, try a simpler approach for the first line
         if not note.account_name:
-            # Remove date-like prefixes and grab what's left
-            cleaned = re.sub(r"^[\d/\-\s]+(?:acct\s+\d+\s*[-–]+\s*)?", "", first_line, flags=re.IGNORECASE)
-            cleaned = re.sub(r"\s*[-–]+\s*.*$", "", cleaned)  # Remove trailing " -- priya" etc.
-            cleaned = cleaned.strip().rstrip(".")
-            if len(cleaned) > 3:
-                note.account_name = cleaned
+            first_line = block.split("\n")[0]
+            name_patterns = [
+                r"\d{4}-\d{2}-\d{2}\s*\|\s*([^|]+?)(?:\s*\||\s*$)",
+                r"(?:Mar|Apr|Jan|Feb|march|april)\s+\d+\s*[-]+\s*(.+?)(?:\s*[-(]|$)",
+                r"\d+/\d+\s+(?:acct\s+\d+\s*[-]+\s*)?(.+?)(?:\s+(?:call|sic|\()|$)",
+                r"^\d{2}/\d{2}\s+(.+?)(?:\s*$)",
+            ]
+            for pattern in name_patterns:
+                m = re.search(pattern, first_line, re.IGNORECASE)
+                if m:
+                    name = m.group(1).strip().rstrip(".")
+                    name = re.sub(r"\s*\(sic\).*", "", name)
+                    name = re.sub(r"\s+call\b.*", "", name, flags=re.IGNORECASE)
+                    if len(name) > 3:
+                        note.account_name = name
+                        break
 
         notes.append(note)
 
     return notes
-
 
 def parse_changelog(path: Path = Config.CHANGELOG_MD) -> list[ChangelogEntry]:
     """

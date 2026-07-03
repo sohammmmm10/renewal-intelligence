@@ -70,18 +70,17 @@ changelog          via math + LLM        score + tier     non-obvious insights
 
 ---
 
-## How the LLM is Used (6 Places)
+## How the LLM is Used (7 Places)
 
 | # | Task | Why LLM, not rules? |
 |---|------|---------------------|
-| 1 | **Name reconciliation** | "BritePath" -> "BrightPath". LLM understands meaning, not just characters |
-| 2 | **CSM sentiment analysis** | Extracts sentiment, competitors, champion status from messy human writing |
-| 3 | **NPS comment sentiment** | Understands sarcasm, context. Keywords miss "execution fell off a cliff" |
-| 4 | **Non-English translation** | Chinese, French, Spanish NPS comments translated before analysis |
-| 5 | **Risk explanations** | Synthesizes 6 signals into 3-5 sentence actionable briefing |
-| 6 | **Insight discovery** | Finds cross-source patterns: silent churn, SDK cascade, champion loss |
-
-Note: CSM note parsing (extracting dates/names from raw text) uses regex, not LLM. The `ai_parse_csm_notes` function exists in `llm_engine.py` as an alternative but is not used in the current pipeline -- regex is faster and sufficient for the known formats.
+| 1 | **CSM note entity extraction** | Notes have 5+ date/name formats. LLM extracts account name, CSM name, date from any style. Regex fallback fills gaps. |
+| 2 | **Name reconciliation** | "BritePath" -> "BrightPath". LLM understands meaning, not just characters |
+| 3 | **CSM sentiment analysis** | Extracts sentiment, competitors, champion status from messy human writing |
+| 4 | **NPS comment sentiment** | Understands sarcasm, context. Keywords miss "execution fell off a cliff" |
+| 5 | **Non-English translation** | Chinese, French, Spanish NPS comments translated before analysis |
+| 6 | **Risk explanations** | Synthesizes 6 signals into 3-5 sentence actionable briefing |
+| 7 | **Insight discovery** | Finds cross-source patterns: silent churn, SDK cascade, champion loss |
 
 ---
 
